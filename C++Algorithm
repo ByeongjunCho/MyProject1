@@ -170,67 +170,103 @@ double batch_gradient(
 	error = 0.0;      // 전체 오차 값을 누적해나간다.
 	for (icase = istart; icase < istop; icase++)  // 입력 행렬의 첫 번째 데이터 인덱스 ~ 마지막 데이터 인덱스
 	{
-		dptr = input + icase*max_neurons;   // 현재 데이터를 가리킨다.
+		dptr = input + icase*max_neurons;   // 현재 데이터를 가리킨다. 행렬에서 icase번째 행을 선택하는 것과 같다.
 											// 입력은 벡터이므로 열 개수를 기준으로 입력을 정한다.
 		trial_thr(dptr, n_all, n_model_inputs, outputs, ntarg, nhid_all, weights_opt, hid_act, final_layer_weights, classifier);
 
 		targ_ptr = targets + icase*ntarg; // 현재 훈련 벡터에 대응하는 타겟 벡터를 가리키는 포인터
-	}
+										  // 정답값
 
-	if (classifier)   // Softmax를 사용한 경우
-	{
-		tmax = -1.e30;
-		for (i = 0; i < ntarg; i++)   // 최대값을 갖는 참 클래스를 찾는다.
+
+		if (classifier)   // Softmax를 사용한 경우
 		{
-			if (targ_ptr[i] > tmax) 
+			tmax = -1.e30;
+			for (i = 0; i < ntarg; i++)   // 최대값을 갖는 참 클래스를 찾는다.
 			{
-				imax = i;
-				tmax = targ_ptr[i];
+				if (targ_ptr[i] > tmax)
+				{
+					imax = i;				// imax에 softmax최대값이 있는 인덱스 저장
+					tmax = targ_ptr[i];    
+				}
+				this_delta[i] = targ_ptr[i] - outputs[i]; //교차 엔트로피를 입력으로 미분해 음의 부호를 취한 식
+														  // 출력값과 정답값의 차이를 this_delta벡터에 저장한다.
 			}
-			this_delta[i] = targ_ptr[i] - outputs[i]; //교차 엔트로피를 입력으로 미분해 음의 부호를 취한 식
+			error -= log(outputs[imax] + 1.e-30); // error = error-log(outputs[imax]+1.e-30) 음의 로그 확률을 최소화한다.
 		}
-		error -= log(outputs[imax] + 1.e-30); // 음의 로그 확률을 최소화한다.
-	}
-	else
-	{
+		else
+		{
+			for (i = 0; i < ntarg; i++)
+			{
+				diff = outputs[i] - targ_ptr[i];
+				error += diff*diff;
+				this_delta[i] = -2.0*diff;
+			}
+		}
+	
+		if (n_all == 1)    // 은닉 레이어가 없는 경우
+		{
+			nprev = n_model_inputs;   // 출력 레이어에 전달되는 입력의 개수
+			prevact = input + icase*max_neurons; //현재 데이터를 가리키는 포인터
+		}
+		else
+		{
+			nprev = nhid_all[n_all - 2];  //n_all-2인덱스가 곧 마지막 은닉 레이어다.
+			prevact = hid_act[n_all - 2]; // 출력 레이어로 전달되는 레이어의 포인터 변수
+		}
+		gradptr = grad_ptr[n_all - 1];  // 기울기 벡터에서 출력 기울기를 가리키는 포인터
+
 		for (i = 0; i < ntarg; i++)
 		{
-			diff = outputs[i] - targ_ptr[i];
-			error += diff*diff;
-			this_delta[i] = -2.0*diff;
+			delta = this_delta[i];  //평가 기준을 logit으로 편미분해 음수를 취한다.
+			for (j = 0; j < nprev; j++)
+				*gradptr++ += delta*prevact[j];  //모든 훈련 데이터에 대한 결과를 누적한다.
+
+			*gradptr++ += delta;  // 바이어스 활성화는 항상 1이다. 
 		}
-	}
-	
-	if (n_all == 1)    // 은닉 레이어가 없는 경우
-	{
-		nprev = n_model_inputs;   // 출력 레이어에 전달되는 입력의 개수
-		prevact = input + icase*max_neurons; //현재 데이터를 가리키는 포인터
-	}
-	else
-	{
-		nprev = nhid_all[n_all - 2];  //n_all-2인덱스가 곧 마지막 은닉 레이어다.
-		prevact = hid_act[n_all - 2]; // 출력 레이어로 전달되는 레이어의 포인터 변수
-	}
-	gradptr = grad_ptr[n_all - 1];  // 기울기 벡터에서 출력 기울기를 가리키는 포인터
+		nnext = ntarg;   // 레이어 되돌아갈 준비를 한다.
+		nextcoefs = final_layer_weights;
+		
+		for (ilayer = n_all - 2; ilayer >= 0; ilayer--) {   // For each hidden layer, working backwards
+			nthis = nhid_all[ilayer];        // Number of neurons in this hidden layer
+			gradptr = grad_ptr[ilayer];      // Point to gradient for this layer
+			for (i = 0; i<nthis; i++) {       // For each neuron in this layer
+				delta = 0.0;
+				for (j = 0; j<nnext; j++)
+					delta += this_delta[j] * nextcoefs[j*(nthis + 1) + i];
+				delta *= hid_act[ilayer][i] * (1.0 - hid_act[ilayer][i]);  // Derivative
+				prior_delta[i] = delta;                    // Save it for the next layer back
+				if (ilayer == 0) {                          // First hidden layer?
+					prevact = input + icase * max_neurons;  // Point to this sample
+					for (j = 0; j<n_model_inputs; j++)
+						*gradptr++ += delta * prevact[j];
+				}
+				else {      // There is at least one more hidden layer prior to this one
+					prevact = hid_act[ilayer - 1];
+					for (j = 0; j<nhid_all[ilayer - 1]; j++)
+						*gradptr++ += delta * prevact[j];
+				}
+				*gradptr++ += delta;   // Bias activation is always 1
+			}  // For all neurons in this hidden layer
 
-	for (i = 0; i < ntarg; i++)
-	{
-		delta = this_delta[i];  //평가 기준을 logit으로 편미분해 음수를 취한다.
-		for (j = 0; j < nprev; j++)
-			*gradptr++ += delta*prevact[j];  //모든 훈련 데이터에 대한 결과를 누적한다.
+			for (i = 0; i<nthis; i++)           // These will be delta for the next layer back
+				this_delta[i] = prior_delta[i];
 
-		*gradptr++ += delta;  // 바이어스 활성화는 항상 1이다. 
-	}
+			nnext = nhid_all[ilayer];          // Prepare for the next layer back
+			nextcoefs = weights_opt[ilayer];
+		}  // For all layers, working backwards
+
+	} // for all cases
+
+	return error;  // MSE or negative log likelihood
 }
 int main()
 {
 	double vec1[] = {1,1,1,1};
 	double vec2[][4] = { {1,2,3,4},{5,6,7,8} };
 	double output[] = {0, 0};
-	double *target, *targ_ptr;
 	int a=0, b=0;
 
 	
 
-	//cout << "   =======   "<< *output <<"   ======   "<< endl;
+	cout << "   =======   "<< 1.e-30 <<"   ======   "<< endl;
 }
