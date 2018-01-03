@@ -198,7 +198,7 @@ double batch_gradient(
 			for (i = 0; i < ntarg; i++)
 			{
 				diff = outputs[i] - targ_ptr[i];
-				error += diff*diff;
+				error += diff*diff;   // error = error + diff^2
 				this_delta[i] = -2.0*diff;
 			}
 		}
@@ -210,10 +210,10 @@ double batch_gradient(
 		}
 		else
 		{
-			nprev = nhid_all[n_all - 2];  //n_all-2인덱스가 곧 마지막 은닉 레이어다.
-			prevact = hid_act[n_all - 2]; // 출력 레이어로 전달되는 레이어의 포인터 변수
+			nprev = nhid_all[n_all - 2];  // n_all-2인덱스가 마지막 은닉 레이어의 개수가 있는 주소이다.
+			prevact = hid_act[n_all - 2]; // 출력 레이어로 전달되는 각각의 뉴런의 포인터 변수
 		}
-		gradptr = grad_ptr[n_all - 1];  // 기울기 벡터에서 출력 기울기를 가리키는 포인터
+		gradptr = grad_ptr[n_all - 1];  // 기울기 벡터에서 출력레이어의 기울기를 가리키는 포인터
 
 		for (i = 0; i < ntarg; i++)
 		{
@@ -226,36 +226,36 @@ double batch_gradient(
 		nnext = ntarg;   // 레이어 되돌아갈 준비를 한다.
 		nextcoefs = final_layer_weights;
 		
-		for (ilayer = n_all - 2; ilayer >= 0; ilayer--) {   // For each hidden layer, working backwards
-			nthis = nhid_all[ilayer];        // Number of neurons in this hidden layer
-			gradptr = grad_ptr[ilayer];      // Point to gradient for this layer
-			for (i = 0; i<nthis; i++) {       // For each neuron in this layer
+		for (ilayer = n_all - 2; ilayer >= 0; ilayer--) {   // 각 은닉 레이어마다 역방향으로 진행해 나간다.
+			nthis = nhid_all[ilayer];        // 현재 은닉 레이어상에 존재하는 뉴런의 개수
+			gradptr = grad_ptr[ilayer];      // 현재 레이어의 기울기를 가리키는 포인터
+			for (i = 0; i<nthis; i++) {       // 현재 레이어상의 뉴런들에 대해 루프 수행
 				delta = 0.0;
 				for (j = 0; j<nnext; j++)
 					delta += this_delta[j] * nextcoefs[j*(nthis + 1) + i];
-				delta *= hid_act[ilayer][i] * (1.0 - hid_act[ilayer][i]);  // Derivative
-				prior_delta[i] = delta;                    // Save it for the next layer back
-				if (ilayer == 0) {                          // First hidden layer?
+				delta *= hid_act[ilayer][i] * (1.0 - hid_act[ilayer][i]);  // 미분 연산
+				prior_delta[i] = delta;                    // 다음 레이어를 위해 저장
+				if (ilayer == 0) {                          // 첫 번째 히든 레이어인가?
 					prevact = input + icase * max_neurons;  // Point to this sample
 					for (j = 0; j<n_model_inputs; j++)
 						*gradptr++ += delta * prevact[j];
 				}
-				else {      // There is at least one more hidden layer prior to this one
+				else {      // 적어도 하나 이상의 은닉 레이어가 현재 레이어 이전에 존재
 					prevact = hid_act[ilayer - 1];
 					for (j = 0; j<nhid_all[ilayer - 1]; j++)
 						*gradptr++ += delta * prevact[j];
 				}
-				*gradptr++ += delta;   // Bias activation is always 1
-			}  // For all neurons in this hidden layer
+				*gradptr++ += delta;   // 바이어스 활성화는 언제나 1이다.
+			}  // 현재 모든 뉴런을 대상으로 한다.
 
-			for (i = 0; i<nthis; i++)           // These will be delta for the next layer back
+			for (i = 0; i<nthis; i++)           // 현재 델타 값을 이전 델타 값으로 저장
 				this_delta[i] = prior_delta[i];
 
-			nnext = nhid_all[ilayer];          // Prepare for the next layer back
+			nnext = nhid_all[ilayer];          // 다음 레이어를 위한 준비
 			nextcoefs = weights_opt[ilayer];
-		}  // For all layers, working backwards
+		}  // 모든 레이어를 대상으로 거꾸로 실행해 나간다.
 
-	} // for all cases
+	} // MSE나 음의 로그 발생 가능 확률 반환
 
 	return error;  // MSE or negative log likelihood
 }
@@ -265,6 +265,7 @@ int main()
 	double vec2[][4] = { {1,2,3,4},{5,6,7,8} };
 	double output[] = {0, 0};
 	int a=0, b=0;
+	
 
 	
 
