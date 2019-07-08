@@ -594,7 +594,7 @@ void convNHWC()
 	// 컨볼루션 시작
 	// alpah와 beta는 "output = alpha * Op(Input) + beta * output" 에 사용됨
 	// 일반 컨보루션은 output = 1 * inputs
-	// 그래서          output = 1 * Op(Inputs) + 0 * output이 되도락 alpha와 beta를 1,0으로 셋팅함
+	// 그래서          output = 1 * Op(Inputs) + 0 * output이 되도록 alpha와 beta를 1,0으로 셋팅함
 	checkCUDNN(cudnnConvolutionForward(cudnnHandle,
 		&alpha,
 		inTensorDesc,
